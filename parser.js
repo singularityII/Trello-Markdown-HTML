@@ -17,37 +17,37 @@ const DEFAULT_THEME = {
 };
 
 function escapeHtml(str) {
-  return str
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
 
-function highlightInline(text, theme) {
+function highlightInline(text) {
   let out = escapeHtml(text);
 
   // Convert inline [AbilityName] references to clean blue text without brackets
-  out = out.replace(/\[([^\]]+)\]/g, '<span class="ability-ref" data-role="textAbility">\$1</span>');
+  out = out.replace(/\[([^\]]+)\]/g, '<span class="ability-ref" data-role="textAbility">$1</span>');
 
   // Highlight durations like "for 1 turn", "for 3 turns"
-  out = out.replace(/\b(for\s+\d+\s+turns?)\b/gi, '<span class="kw-dur" data-role="kwDuration">\$1</span>');
+  out = out.replace(/\b(for\s+\d+\s+turns?)\b/gi, '<span class="kw-dur" data-role="kwDuration">$1</span>');
 
   // Highlight numbers, percentages, and math formulas like 15% + (5% * shard) or 1/100
-  out = out.replace(/(\b\d+(?:\/\d+|%)?(?:\s*[\+\-\*\/]\s*\([^)]+\))?)/g, '<span class="kw-num" data-role="kwNumber">\$1</span>');
+  out = out.replace(/(\b\d+(?:\/\d+|%)?(?:\s*[\+\-\*\/]\s*\([^)]+\))?)/g, '<span class="kw-num" data-role="kwNumber">$1</span>');
 
   // Highlight keywords
-  out = out.replace(/\b(blood|burn|rot|dark)\b/gi, '<span class="kw-blood" data-role="kwBlood">\$1</span>');
-  out = out.replace(/\b(bleed|bleeding|dies|execute|lose)\b/gi, '<span class="kw-bleed" data-role="kwBleed">\$1</span>');
-  out = out.replace(/\b(heal|healing|heals)\b/gi, '<span class="kw-heal" data-role="kwHeal">\$1</span>');
-  out = out.replace(/\b(crystalized|stun|stunned|lightning|steal a buff)\b/gi, '<span class="kw-crystal" data-role="kwCrystal">\$1</span>');
-  out = out.replace(/\b(reverse a debuff|anti heal)\b/gi, '<span class="kw-debuff" data-role="kwDebuff">\$1</span>');
+  out = out.replace(/\b(blood|burn|rot|dark)\b/gi, '<span class="kw-blood" data-role="kwBlood">$1</span>');
+  out = out.replace(/\b(bleed|bleeding|dies|execute|lose)\b/gi, '<span class="kw-bleed" data-role="kwBleed">$1</span>');
+  out = out.replace(/\b(heal|healing|heals)\b/gi, '<span class="kw-heal" data-role="kwHeal">$1</span>');
+  out = out.replace(/\b(crystalized|stun|stunned|lightning|steal a buff)\b/gi, '<span class="kw-crystal" data-role="kwCrystal">$1</span>');
+  out = out.replace(/\b(reverse a debuff|anti heal)\b/gi, '<span class="kw-debuff" data-role="kwDebuff">$1</span>');
 
   return out;
 }
 
 function parseTrelloMarkdown(rawText, theme = DEFAULT_THEME) {
-const lines = rawText.split('\n');
-  let htmlParts = [];
+  const lines = (rawText || '').split('\n');
+  const htmlParts = [];
   let inCodeBlock = false;
   let codeLines = [];
   let inItemBody = false;
@@ -60,11 +60,10 @@ const lines = rawText.split('\n');
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
+    const trimmed = lines[i].trim();
 
-    // Handle ``` code blocks (like Stats)
-    if (trimmed.startsWith('```')) {
+    // Handle ``` or - ``` code blocks (like Stats)
+    if (/^(?:[-*•]\s*)?```/.test(trimmed)) {
       if (!inCodeBlock) {
         closeItemBody();
         inCodeBlock = true;
@@ -88,17 +87,18 @@ const lines = rawText.split('\n');
       continue;
     }
 
-    // Handle Section Headers: "## [Abilities]", "[Stats]", "## Passives", etc.
-    const sectionMatch = trimmed.match(/^(?:#{1,3}\s*)?\[?([A-Za-z0-9 _-]+)\]?\$/);
-    if (sectionMatch && !trimmed.includes('(') && (trimmed.startsWith('#') || /^\[[^\]]+\]\$/.test(trimmed)) && !inItemBody) {
+    // Handle Section Headers: "Stats", "## [Abilities]", "[Passives]", "## Resistances", etc.
+    const markdownHeader = trimmed.match(/^#{1,3}\s*\[?([^\]]+)\]?\$/);
+    const plainSection = trimmed.match(/^\[?(Stats\vert{}Abilities\vert{}Passives\vert{}Resistances\vert{}Weaknesses)\]?\$/i);
+    if ((markdownHeader || plainSection) && !trimmed.includes('(')) {
       closeItemBody();
-      const titleText = sectionMatch[1].trim();
+      const titleText = (markdownHeader ? markdownHeader[1] : plainSection[1]).trim();
       const tag = titleText.toLowerCase() === 'stats' ? 'h3' : 'h2';
       htmlParts.push(`<${tag} class="section-header" data-role="textHeader">${escapeHtml(titleText)}</${tag}>`);
       continue;
     }
 
-    // Handle Ability / Passive Item Headers: "[Bloodbloom](0 Energy)(0 CD)" or "[Solemn flame]"
+    // Handle Ability / Passive Item Headers: "[Bloodbloom](0 Energy)(0 CD)" or "- [Solemn flame]"
     const itemHeaderMatch = trimmed.match(/^(?:[-*•]\s*)?\[([^\]]+)\]((?:\s*\([^)]+\))*)\$/);
     if (itemHeaderMatch) {
       closeItemBody();
@@ -125,15 +125,15 @@ const lines = rawText.split('\n');
       continue;
     }
 
-    // Bullet points inside an item body: "- If an enemy..."
+    // Bullet points: "- If an enemy..."
     const bulletMatch = trimmed.match(/^[-*•]\s+(.*)\$/);
     if (bulletMatch) {
-      const content = highlightInline(bulletMatch[1], theme);
+      const content = highlightInline(bulletMatch[1]);
       htmlParts.push(`<div class="sub-bullet"><span class="sub-dot">•</span><span>${content}</span></div>`);
       continue;
     }
 
-    // Standalone "Key = Value" lines outside of ``` blocks (auto-styled like Stats)
+    // Standalone "Key = Value" lines outside of ``` blocks
     const standaloneStat = trimmed.match(/^([A-Za-z0-9_]+)\s*=\s*(.+)$/);
     if (standaloneStat && !inItemBody) {
       htmlParts.push(`
@@ -146,8 +146,8 @@ const lines = rawText.split('\n');
       continue;
     }
 
-    // Regular description text inside or outside an item
-    const styledLine = highlightInline(trimmed, theme);
+    // Regular description paragraph
+    const styledLine = highlightInline(trimmed);
     htmlParts.push(`<p class="body-para">${styledLine}</p>`);
   }
 
