@@ -1,95 +1,250 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <script src="https://trellocdn.com"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visual Style &amp; Color Editor</title>
+
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
   <script src="./parser.js"></script>
+
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: sans-serif; background: #121217; color: #fff; display: flex; flex-direction: column; height: 100vh; }
-    .toolbar { background: #1e1e28; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
-    .hint { font-size: 13px; color: #a899e6; }
-    button { background: #5c6bc0; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-    button:hover { background: #7986cb; }
-    #preview-area { flex: 1; overflow-y: auto; }
-    
-    #context-menu {
-      display: none; position: fixed; z-index: 9999; background: #252532;
-      border: 1px solid #444; border-radius: 6px; padding: 12px; width: 220px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
     }
-    #context-menu label { display: block; font-size: 12px; color: #bbb; margin-bottom: 6px; }
-    #context-menu input[type="color"] { width: 100%; height: 32px; border: none; background: none; cursor: pointer; margin-bottom: 10px; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #121217;
+      color: #fff;
+      font-family: Arial, sans-serif;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      background: #1e1e28;
+      border-bottom: 1px solid #333;
+    }
+
+    .hint {
+      color: #a899e6;
+      font-size: 13px;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      padding: 8px 14px;
+      border: 0;
+      border-radius: 4px;
+      background: #5c6bc0;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    button:hover { filter: brightness(1.12); }
+    button:disabled { opacity: .6; cursor: wait; }
+
+    #copy-html-btn { background: #388e3c; }
+    #preview-area {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      background: #181820;
+    }
+
+    #status {
+      min-height: 24px;
+      padding: 4px 20px;
+      color: #bdbdbd;
+      background: #1e1e28;
+      font-size: 12px;
+    }
+
+    #context-menu {
+      display: none;
+      position: fixed;
+      z-index: 9999;
+      width: 230px;
+      padding: 12px;
+      border: 1px solid #444;
+      border-radius: 6px;
+      background: #252532;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .6);
+    }
+
+    #context-menu label {
+      display: block;
+      margin-bottom: 6px;
+      color: #bbb;
+      font-size: 12px;
+    }
+
+    #context-menu input[type="color"] {
+      width: 100%;
+      height: 36px;
+      margin: 0 0 10px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #context-menu button { width: 100%; }
   </style>
 </head>
 <body>
-
-  <div class="toolbar">
-    <span class="hint">Right-click any text, keyword, or background below to customize colors</span>
-    <div>
-      <button id="copy-html-btn" style="background:#388e3c; margin-right:8px;">Copy HTML</button>
-      <button id="save-btn">Save & Apply to Card</button>
+  <header class="toolbar">
+    <span class="hint">Right-click a styled element in the preview to change its color.</span>
+    <div class="toolbar-actions">
+      <button id="copy-html-btn" type="button">Copy HTML</button>
+      <button id="save-btn" type="button">Save &amp; Apply to Card</button>
     </div>
-  </div>
+  </header>
 
-  <div id="preview-area"></div>
+  <main id="preview-area" aria-label="Formatted card preview"></main>
+  <div id="status" role="status" aria-live="polite">Loading card…</div>
 
-  <div id="context-menu">
-    <div id="menu-target-label" style="font-weight:bold; margin-bottom:8px; color:#6fa8dc;">Edit Style</div>
-    <label>Color / Highlight</label>
+  <div id="context-menu" role="dialog" aria-label="Edit element color">
+    <div id="menu-target-label" style="font-weight:700; margin-bottom:8px; color:#6fa8dc;">
+      Edit style
+    </div>
+    <label for="color-picker">Color</label>
     <input type="color" id="color-picker">
-    <button id="close-menu" style="width:100%; padding:4px; font-size:12px;">Done</button>
+    <button id="close-menu" type="button">Done</button>
   </div>
 
   <script>
     const t = TrelloPowerUp.iframe();
+
     let currentTheme = { ...DEFAULT_THEME };
-    let cardDesc = '';
-    let activeRole = 'bgMain';
+    let cardDesc = "";
+    let activeRole = "bgMain";
 
-    const preview = document.getElementById('preview-area');
-    const menu = document.getElementById('context-menu');
-    const picker = document.getElementById('color-picker');
+    const preview = document.getElementById("preview-area");
+    const menu = document.getElementById("context-menu");
+    const picker = document.getElementById("color-picker");
+    const status = document.getElementById("status");
+    const saveButton = document.getElementById("save-btn");
 
-    async function init() {
-      const card = await t.card('desc');
-      cardDesc = card.desc || '[Stats]\nLuck = 100\n\n[Abilities]\n[Bloodbloom](0 Energy)\nDeals 15% damage and heals 5% blood.';
-      const savedTheme = await t.get('card', 'shared', 'customTheme');
-      if (savedTheme) currentTheme = { ...DEFAULT_THEME, ...savedTheme };
-      render();
+    function setStatus(message) {
+      status.textContent = message;
     }
 
     function render() {
       preview.innerHTML = parseTrelloMarkdown(cardDesc, currentTheme);
     }
 
-    preview.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const role = e.target.getAttribute('data-role') || 'bgMain';
-      activeRole = role;
-      document.getElementById('menu-target-label').textContent = `Editing: ${role}`;
-      picker.value = currentTheme[role] || '#ffffff';
-      menu.style.display = 'block';
-      menu.style.left = `${Math.min(e.pageX, window.innerWidth - 230)}px`;
-      menu.style.top = `${Math.min(e.pageY, window.innerHeight - 140)}px`;
+    function closeMenu() {
+      menu.style.display = "none";
+    }
+
+    function openMenu(event, role) {
+      activeRole = Object.prototype.hasOwnProperty.call(DEFAULT_THEME, role)
+        ? role
+        : "bgMain";
+
+      document.getElementById("menu-target-label").textContent =
+        `Editing: ${activeRole}`;
+
+      picker.value = currentTheme[activeRole] || "#ffffff";
+      menu.style.display = "block";
+
+      const menuWidth = 230;
+      const menuHeight = 145;
+      menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8))}px`;
+    }
+
+    async function init() {
+      try {
+        const [card, savedTheme] = await Promise.all([
+          t.card("desc"),
+          t.get("card", "shared", "customTheme")
+        ]);
+
+        cardDesc = (card && card.desc) || "";
+        currentTheme = normalizeTheme(savedTheme || DEFAULT_THEME);
+
+        render();
+        setStatus(cardDesc ? "Preview ready. Right-click an element to customize its color." :
+          "This card has no description yet. Add content to the card and reopen the editor.");
+      } catch (error) {
+        console.error("Unable to load Trello card data:", error);
+        setStatus("Could not load card data. Check the browser console and Power-Up permissions.");
+      }
+    }
+
+    preview.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+
+      const styledElement = event.target.closest("[data-role]");
+      const role = styledElement ? styledElement.getAttribute("data-role") : "bgMain";
+
+      openMenu(event, role);
     });
 
-    picker.addEventListener('input', (e) => {
-      currentTheme[activeRole] = e.target.value;
+    picker.addEventListener("input", (event) => {
+      currentTheme[activeRole] = event.target.value;
       render();
     });
 
-    document.getElementById('close-menu').onclick = () => menu.style.display = 'none';
+    document.getElementById("close-menu").addEventListener("click", closeMenu);
 
-    document.getElementById('save-btn').onclick = async () => {
-      await t.set('card', 'shared', 'customTheme', currentTheme);
-      t.closeModal();
-    };
+    document.addEventListener("click", (event) => {
+      if (menu.style.display === "block" &&
+          !menu.contains(event.target) &&
+          !preview.contains(event.target)) {
+        closeMenu();
+      }
+    });
 
-    document.getElementById('copy-html-btn').onclick = () => {
-      navigator.clipboard.writeText(preview.innerHTML);
-      alert('Styled HTML copied to clipboard!');
-    };
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeMenu();
+    });
+
+    document.getElementById("save-btn").addEventListener("click", async () => {
+      saveButton.disabled = true;
+      setStatus("Saving theme…");
+
+      try {
+        await t.set("card", "shared", "customTheme", normalizeTheme(currentTheme));
+        setStatus("Theme saved. Applying changes…");
+        t.closeModal();
+      } catch (error) {
+        console.error("Unable to save theme:", error);
+        setStatus("Could not save the theme. Check the browser console and try again.");
+        saveButton.disabled = false;
+      }
+    });
+
+    document.getElementById("copy-html-btn").addEventListener("click", async () => {
+      const html = preview.innerHTML;
+
+      try {
+        await navigator.clipboard.writeText(html);
+        setStatus("Formatted HTML copied to clipboard.");
+      } catch (error) {
+        console.error("Clipboard write failed:", error);
+        setStatus("Clipboard access was blocked by the browser.");
+      }
+    });
 
     init();
   </script>

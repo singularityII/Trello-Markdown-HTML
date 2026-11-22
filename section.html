@@ -1,19 +1,43 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <script src="https://trellocdn.com"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Formatted Sheet</title>
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
   <script src="./parser.js"></script>
+  <style>
+    html, body {
+      min-height: 100%;
+      margin: 0;
+      background: #181820;
+    }
+  </style>
 </head>
-<body style="margin:0;">
+<body>
   <div id="view"></div>
+
   <script>
     const t = TrelloPowerUp.iframe();
-    t.render(async function() {
-      const card = await t.card('desc');
-      const savedTheme = await t.get('card', 'shared', 'customTheme');
-      document.getElementById('view').innerHTML = parseTrelloMarkdown(card.desc || '', savedTheme || DEFAULT_THEME);
-      t.sizeTo('#view');
+    const view = document.getElementById("view");
+
+    t.render(async function () {
+      try {
+        const [card, savedTheme] = await Promise.all([
+          t.card("desc"),
+          t.get("card", "shared", "customTheme")
+        ]);
+
+        view.innerHTML = parseTrelloMarkdown(
+          (card && card.desc) || "",
+          savedTheme || DEFAULT_THEME
+        );
+
+        await t.sizeTo("#view");
+      } catch (error) {
+        console.error("Unable to render formatted card section:", error);
+        view.textContent = "Unable to load the formatted card content.";
+      }
     });
   </script>
 </body>

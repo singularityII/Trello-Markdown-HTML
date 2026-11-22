@@ -1,31 +1,34 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <script src="https://trellocdn.com"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trello Markdown HTML Power-Up</title>
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
 </head>
 <body>
 <script>
   TrelloPowerUp.initialize({
-    'card-back-section': function(t, options) {
+    "card-back-section": function (t) {
       return {
-        title: 'Formatted Sheet',
-        icon: 'https://flaticon.com',
+        title: "Formatted Sheet",
+        icon: "https://singularityii.github.io/Trello-Markdown-HTML/icon.svg",
         content: {
-          type: 'iframe',
-          url: t.signUrl('./section.html'),
+          type: "iframe",
+          url: t.signUrl("./section.html"),
           height: 500
         }
       };
     },
-    'card-buttons': function(t, options) {
+
+    "card-buttons": function (t) {
       return [{
-        icon: 'https://flaticon.com',
-        text: 'Customize Style',
-        callback: function(t) {
+        icon: "https://singularityii.github.io/Trello-Markdown-HTML/icon.svg",
+        text: "Customize Style",
+        callback: function (t) {
           return t.modal({
-            title: 'Visual Style & Color Editor',
-            url: './editor.html',
+            title: "Visual Style & Color Editor",
+            url: "./editor.html",
             fullscreen: true
           });
         }
