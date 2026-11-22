@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://trellocdn.com"></script>
+  <script src="./parser.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: sans-serif; background: #121217; color: #fff; display: flex; flex-direction: column; height: 100vh; }
+    .toolbar { background: #1e1e28; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+    .hint { font-size: 13px; color: #a899e6; }
+    button { background: #5c6bc0; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #7986cb; }
+    #preview-area { flex: 1; overflow-y: auto; }
+    
+    /* Right-Click Dropdown Menu */
+    #context-menu {
+      display: none; position: fixed; z-index: 9999; background: #252532;
+      border: 1px solid #444; border-radius: 6px; padding: 12px; width: 220px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    }
+    #context-menu label { display: block; font-size: 12px; color: #bbb; margin-bottom: 6px; }
+    #context-menu input[type="color"] { width: 100%; height: 32px; border: none; background: none; cursor: pointer; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <span class="hint">💡 Right-click any text, keyword, or background below to customize colors</span>
+    <div>
+      <button id="copy-html-btn" style="background:#388e3c; margin-right:8px;">Copy HTML</button>
+      <button id="save-btn">Save & Apply to Card</button>
+    </div>
+  </div>
+
+  <div id="preview-area"></div>
+
+  <!-- Right-Click Dropdown -->
+  <div id="context-menu">
+    <div id="menu-target-label" style="font-weight:bold; margin-bottom:8px; color:#6fa8dc;">Edit Style</div>
+    <label>Color / Highlight</label>
+    <input type="color" id="color-picker">
+    <button id="close-menu" style="width:100%; padding:4px; font-size:12px;">Done</button>
+  </div>
+
+  <script>
+    const t = TrelloPowerUp.iframe();
+    let currentTheme = { ...DEFAULT_THEME };
+    let cardDesc = '';
+    let activeRole = 'bgMain';
+
+    const preview = document.getElementById('preview-area');
+    const menu = document.getElementById('context-menu');
+    const picker = document.getElementById('color-picker');
+
+    async function init() {
+      const card = await t.card('desc');
+      cardDesc = card.desc || '[Stats]\nLuck = 100\n\n[Abilities]\n[Bloodbloom](0 Energy)\nDeals 15% damage and heals 5% blood.';
+      const savedTheme = await t.get('card', 'shared', 'customTheme');
+      if (savedTheme) currentTheme = { ...DEFAULT_THEME, ...savedTheme };
+      render();
+    }
+
+    function render() {
+      preview.innerHTML = parseTrelloMarkdown(cardDesc, currentTheme);
+    }
+
+    // Right-click handler
+    preview.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const role = e.target.getAttribute('data-role') || 'bgMain';
+      activeRole = role;
+      document.getElementById('menu-target-label').textContent = `Editing: ${role}`;
+      picker.value = currentTheme[role] || '#ffffff';
+      menu.style.display = 'block';
+      menu.style.left = `${Math.min(e.pageX, window.innerWidth - 230)}px`;
+      menu.style.top = `${Math.min(e.pageY, window.innerHeight - 140)}px`;
+    });
+
+    picker.addEventListener('input', (e) => {
+      currentTheme[activeRole] = e.target.value;
+      render();
+    });
+
+    document.getElementById('close-menu').onclick = () => menu.style.display = 'none';
+
+    document.getElementById('save-btn').onclick = async () => {
+      await t.set('card', 'shared', 'customTheme', currentTheme);
+      t.closeModal();
+    };
+
+    document.getElementById('copy-html-btn').onclick = () => {
+      navigator.clipboard.writeText(preview.innerHTML);
+      alert('Styled HTML copied to clipboard!');
+    };
+
+    init();
+  </script>
+</body>
+</html>
