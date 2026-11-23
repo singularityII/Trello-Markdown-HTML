@@ -58,8 +58,8 @@ function highlightInline(value) {
 
   // Inline code and emphasis are parsed before semantic syntax highlighting.
   html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-  html = html.replace(/**(.+?)**/g, '<strong>$1</strong>');
-  html = html.replace(/(^|[^*])*([^*]+)*(?!*)/g, '$1<em>$2</em>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
 
   // Parenthetical metadata is intentionally syntax-based, not word-based.
   html = html.replace(/(\([^()\n]{1,80}\))/g,
