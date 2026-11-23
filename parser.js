@@ -6,250 +6,238 @@ const DEFAULT_THEME = {
   textAbility: '#6fa8dc',
   borderLine: '#324a5e',
   codeCyan: '#56b6c2',
-  kwBlood: '#e06c75',
-  kwBleed: '#e05252',
-  kwHeal: '#98c379',
-  kwBuff: '#61afef',
-  kwDebuff: '#c678dd',
-  kwNumber: '#d19a66',
-  kwCrystal: '#61afef',
-  kwDuration: '#61afef'
+  textNumber: '#d19a66',
+  textDuration: '#98c379',
+  textMetadata: '#c678dd',
+  textReference: '#6fa8dc',
+  textStatKey: '#56b6c2',
+  textStatValue: '#dcddde',
+  textEmphasis: '#e5c07b',
+  textBullet: '#828997'
 };
 
-function escapeHtml(str) {
-  return String(str)
+function normalizeTheme(savedTheme) {
+  const normalized = { ...DEFAULT_THEME };
+  if (!savedTheme || typeof savedTheme !== 'object') return normalized;
+  for (const key of Object.keys(DEFAULT_THEME)) {
+    const value = savedTheme[key];
+    if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) {
+      normalized[key] = value;
+    }
+  }
+  // Migrate older saved themes without retaining character-specific roles.
+  const legacy = {
+    textNumber: 'kwNumber',
+    textDuration: 'kwDuration',
+    textMetadata: 'textHeader',
+    textReference: 'textAbility',
+    textStatKey: 'codeCyan',
+    textStatValue: 'codeCyan'
+  };
+  for (const [nextKey, oldKey] of Object.entries(legacy)) {
+    const value = savedTheme[oldKey];
+    if (normalized[nextKey] === DEFAULT_THEME[nextKey] &&
+        typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) {
+      normalized[nextKey] = value;
+    }
+  }
+  return normalized;
+}
+
+function escapeHtml(value) {
+  return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-function highlightInline(text) {
-  let out = escapeHtml(text);
+function highlightInline(value) {
+  let html = escapeHtml(value);
 
-  // Convert inline [AbilityName] references to clean blue text without brackets
-  out = out.replace(/\[([^\]]+)\]/g, '<span class="ability-ref" data-role="textAbility">$1</span>');
+  // Inline code and emphasis are parsed before semantic syntax highlighting.
+  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
 
-  // Highlight durations like "for 1 turn", "for 3 turns"
-  out = out.replace(/\b(for\s+\d+\s+turns?)\b/gi, '<span class="kw-dur" data-role="kwDuration">$1</span>');
+  // Parenthetical metadata is intentionally syntax-based, not word-based.
+  html = html.replace(/(\([^()\n]{1,80}\))/g,
+    '<span class="item-meta" data-role="textMetadata">$1</span>');
 
-  // Highlight numbers, percentages, and math formulas like 15% + (5% * shard) or 1/100
-  out = out.replace(/(\b\d+(?:\/\d+|%)?(?:\s*[\+\-\*\/]\s*\([^)]+\))?)/g, '<span class="kw-num" data-role="kwNumber">$1</span>');
+  // Square-bracket references are treated uniformly, regardless of their names.
+  html = html.replace(/\[([^\]\n]+)\]/g,
+    '<span class="ability-ref" data-role="textReference">$1</span>');
 
-  // Highlight keywords
-  out = out.replace(/\b(blood|burn|rot|dark)\b/gi, '<span class="kw-blood" data-role="kwBlood">$1</span>');
-  out = out.replace(/\b(bleed|bleeding|dies|execute|lose)\b/gi, '<span class="kw-bleed" data-role="kwBleed">$1</span>');
-  out = out.replace(/\b(heal|healing|heals)\b/gi, '<span class="kw-heal" data-role="kwHeal">$1</span>');
-  out = out.replace(/\b(crystalized|stun|stunned|lightning|steal a buff)\b/gi, '<span class="kw-crystal" data-role="kwCrystal">$1</span>');
-  out = out.replace(/\b(reverse a debuff|anti heal)\b/gi, '<span class="kw-debuff" data-role="kwDebuff">$1</span>');
+  // Durations and numbers are identified by their shape, not their meaning.
+  html = html.replace(/\b(for\s+\d+(?:\.\d+)?\s+(?:turns?|rounds?|seconds?|minutes?|hours?))\b/gi,
+    '<span class="kw-dur" data-role="textDuration">$1</span>');
+  html = html.replace(/(?<![\w-])[-+]?\d+(?:\.\d+)?(?:%|\b)(?:\s*\/\s*\d+(?:\.\d+)?)?/g,
+    '<span class="kw-num" data-role="textNumber">$&</span>');
 
-  return out;
+  return html;
 }
 
-function parseTrelloMarkdown(rawText, theme = DEFAULT_THEME) {
-  const lines = (rawText || '').split('\n');
-  const htmlParts = [];
-  let inCodeBlock = false;
+function parseTrelloMarkdown(rawText, savedTheme = DEFAULT_THEME) {
+  const theme = normalizeTheme(savedTheme);
+  const lines = String(rawText || '').replace(/\r\n?/g, '\n').split('\n');
+  const output = [];
+  let inCode = false;
   let codeLines = [];
-  let inItemBody = false;
+  let inItem = false;
+  let paragraphLines = [];
+  let listDepth = 0;
 
-  const closeItemBody = () => {
-    if (inItemBody) {
-      htmlParts.push('</div></div>');
-      inItemBody = false;
-    }
+  const closeItem = () => {
+    flushParagraph();
+    if (inItem) output.push('</div></article>');
+    inItem = false;
+  };
+  const flushParagraph = () => {
+    if (!paragraphLines.length) return;
+    output.push('<p class="body-para">' +
+      paragraphLines.map(highlightInline).join('<br>') + '</p>');
+    paragraphLines = [];
+  };
+  const renderStat = (line) => {
+    const match = line.match(/^\s*([^=:\n]+?)\s*(=|:)\s*(.*?)\s*$/);
+    if (!match) return null;
+    return '<div class="stats-inline" data-role="bgCode">' +
+      '<span class="code-key" data-role="textStatKey">' + escapeHtml(match[1]) + '</span>' +
+      '<span class="code-eq">' + match[2] + '</span>' +
+      '<span class="code-val" data-role="textStatValue">' + highlightInline(match[3]) + '</span></div>';
+  };
+  const renderCode = () => {
+    const rows = codeLines.map((line) => {
+      const stat = renderStat(line);
+      return stat || '<div class="code-line">' + highlightInline(line) + '</div>';
+    }).join('');
+    output.push('<div class="stats-block" data-role="bgCode">' + rows + '</div>');
+    codeLines = [];
+  };
+  const renderListLine = (line) => {
+    const match = line.match(/^(\s*)([-*+] |•\s+)(.*)$/);
+    if (!match) return false;
+    flushParagraph();
+    const depth = Math.floor(match[1].replace(/\t/g, '  ').length / 2);
+    output.push('<div class="sub-bullet" style="margin-left:' + Math.min(depth, 8) * 18 +
+      'px"><span class="sub-dot" data-role="textBullet">•</span><span>' +
+      highlightInline(match[3]) + '</span></div>');
+    listDepth = depth;
+    return true;
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
+    const original = lines[i];
+    const line = original.trim();
 
-    // Handle ``` or - ``` code blocks (like Stats)
-    if (/^(?:[-*•]\s*)?```/.test(trimmed)) {
-      if (!inCodeBlock) {
-        closeItemBody();
-        inCodeBlock = true;
+    // Fenced blocks accept ordinary and bullet-prefixed fences.
+    if (/^(?:[-*+]\s*)?`{3,}/.test(line)) {
+      flushParagraph();
+      if (!inCode) {
+        closeItem();
+        inCode = true;
         codeLines = [];
       } else {
-        inCodeBlock = false;
-        const formattedCode = codeLines.map(cl => {
-          const eqMatch = cl.match(/^([^=]+)=(.+)\$/);
-          if (eqMatch) {
-            return `<div><span class="code-key" data-role="codeCyan">${escapeHtml(eqMatch[1].trim())}</span> <span class="code-eq">=</span> <span class="code-val" data-role="codeCyan">${escapeHtml(eqMatch[2].trim())}</span></div>`;
-          }
-          return `<div>${escapeHtml(cl)}</div>`;
-        }).join('');
-        htmlParts.push(`<div class="stats-block" data-role="bgCode">${formattedCode}</div>`);
+        inCode = false;
+        renderCode();
       }
       continue;
     }
-
-    if (inCodeBlock) {
-      if (trimmed !== '') codeLines.push(trimmed);
+    if (inCode) {
+      codeLines.push(original);
       continue;
     }
 
-    // Handle Section Headers: "Stats", "## [Abilities]", "[Passives]", "## Resistances", etc.
-    const markdownHeader = trimmed.match(/^#{1,3}\s*\[?([^\]]+)\]?\$/);
-    const plainSection = trimmed.match(/^\[?(Stats\vert{}Abilities\vert{}Passives\vert{}Resistances\vert{}Weaknesses)\]?\$/i);
-    if ((markdownHeader || plainSection) && !trimmed.includes('(')) {
-      closeItemBody();
-      const titleText = (markdownHeader ? markdownHeader[1] : plainSection[1]).trim();
-      const tag = titleText.toLowerCase() === 'stats' ? 'h3' : 'h2';
-      htmlParts.push(`<${tag} class="section-header" data-role="textHeader">${escapeHtml(titleText)}</${tag}>`);
+    if (!line) {
+      flushParagraph();
+      if (inItem) output.push('<div class="para-spacer"></div>');
+      listDepth = 0;
       continue;
     }
 
-    // Handle Ability / Passive Item Headers: "[Bloodbloom](0 Energy)(0 CD)" or "- [Solemn flame]"
-    const itemHeaderMatch = trimmed.match(/^(?:[-*•]\s*)?\[([^\]]+)\]((?:\s*\([^)]+\))*)\$/);
-    if (itemHeaderMatch) {
-      closeItemBody();
-      const itemName = itemHeaderMatch[1].trim();
-      const metaTags = itemHeaderMatch[2].trim();
-      htmlParts.push(`
-        <div class="tree-item">
-          <div class="item-header">
-            <span class="bullet">•</span>
-            <span class="item-title" data-role="textAbility">${escapeHtml(itemName)}</span>
-            ${metaTags ? `<span class="item-meta" data-role="textHeader">\${escapeHtml(metaTags)}</span>` : ''}
-          </div>
-          <div class="indented-body" data-role="borderLine">
-      `);
-      inItemBody = true;
+    // Markdown headings and standalone section labels.
+    const heading = line.match(/^#{1,3}\s+(.+?)\s*#*$/);
+    const section = line.match(/^\[?(Stats|Abilities|Passives|Resistances|Weaknesses|Traits|Equipment|Notes|Overview)\]?\s*:?$/i);
+    if (heading || section) {
+      flushParagraph();
+      closeItem();
+      const title = (heading ? heading[1] : section[1]).replace(/^\[|\]$/g, '').trim();
+      const isStats = /^stats$/i.test(title);
+      output.push('<' + (isStats ? 'h3' : 'h2') +
+        ' class="section-header" data-role="textHeader">' + escapeHtml(title) +
+        '</' + (isStats ? 'h3' : 'h2') + '>');
       continue;
     }
 
-    // Empty line inside an item body separates paragraphs cleanly
-    if (trimmed === '') {
-      if (inItemBody) {
-        htmlParts.push('<div class="para-spacer"></div>');
-      }
+    // Stats outside a fenced block.
+    const stat = renderStat(line);
+    if (stat && !inItem) {
+      flushParagraph();
+      output.push(stat);
       continue;
     }
 
-    // Bullet points: "- If an enemy..."
-    const bulletMatch = trimmed.match(/^[-*•]\s+(.*)\$/);
-    if (bulletMatch) {
-      const content = highlightInline(bulletMatch[1]);
-      htmlParts.push(`<div class="sub-bullet"><span class="sub-dot">•</span><span>${content}</span></div>`);
+    // Generic item heading: [Name] followed by zero or more metadata groups.
+    // Also supports a bullet prefix and a plain name followed by metadata.
+    const item = line.match(/^(?:[-*+]\s*)?\[([^\]]+)\]\s*((?:\([^()]*\)\s*)*)$/);
+    const plainItem = line.match(/^[-*+]\s+([^()[\]<>]{1,70}?)\s*((?:\([^()]*\)\s*)+)$/);
+    if (item || plainItem) {
+      flushParagraph();
+      closeItem();
+      const name = (item ? item[1] : plainItem[1]).trim();
+      const metadata = (item ? item[2] : plainItem[2]).trim();
+      output.push('<article class="tree-item"><div class="item-header">' +
+        '<span class="bullet" data-role="textBullet">•</span>' +
+        '<span class="item-title" data-role="textAbility">' + escapeHtml(name) + '</span>' +
+        (metadata ? '<span class="item-meta" data-role="textMetadata">' +
+          highlightInline(metadata) + '</span>' : '') +
+        '</div><div class="indented-body" data-role="borderLine">');
+      inItem = true;
       continue;
     }
 
-    // Standalone "Key = Value" lines outside of ``` blocks
-    const standaloneStat = trimmed.match(/^([A-Za-z0-9_]+)\s*=\s*(.+)$/);
-    if (standaloneStat && !inItemBody) {
-      htmlParts.push(`
-        <div class="stats-inline" data-role="bgCode">
-          <span class="code-key" data-role="codeCyan">${escapeHtml(standaloneStat[1])}</span>
-          <span class="code-eq">=</span>
-          <span class="code-val" data-role="codeCyan">${escapeHtml(standaloneStat[2])}</span>
-        </div>
-      `);
+    if (renderListLine(original)) continue;
+
+    // A bare [Name] line can be an item title; references in prose remain inline.
+    const bareItem = line.match(/^\[([^\]]+)\]$/);
+    if (bareItem && (i + 1 < lines.length) && lines[i + 1].trim()) {
+      flushParagraph();
+      closeItem();
+      output.push('<article class="tree-item"><div class="item-header">' +
+        '<span class="bullet" data-role="textBullet">•</span>' +
+        '<span class="item-title" data-role="textAbility">' + escapeHtml(bareItem[1]) +
+        '</span></div><div class="indented-body" data-role="borderLine">');
+      inItem = true;
       continue;
     }
 
-    // Regular description paragraph
-    const styledLine = highlightInline(trimmed);
-    htmlParts.push(`<p class="body-para">${styledLine}</p>`);
+    paragraphLines.push(line);
   }
 
-  closeItemBody();
+  if (inCode) renderCode();
+  flushParagraph();
+  closeItem();
 
   return `
     <style>
-      body {
-        background-color: ${theme.bgMain};
-        color: ${theme.textMain};
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        font-size: 14.5px;
-        line-height: 1.6;
-        padding: 18px 22px;
-        margin: 0;
-      }
-      h2.section-header {
-        color: ${theme.textHeader};
-        font-size: 1.55em;
-        font-weight: 700;
-        margin: 26px 0 14px 0;
-        padding-bottom: 6px;
-        border-bottom: 1px solid #2b2b36;
-      }
-      h3.section-header {
-        color: ${theme.textHeader};
-        font-size: 1.1em;
-        font-weight: 600;
-        margin: 0 0 10px 0;
-      }
-      .stats-block {
-        background-color: ${theme.bgCode};
-        border: 1px solid #262633;
-        border-radius: 6px;
-        padding: 12px 16px;
-        font-family: "Fira Code", "JetBrains Mono", Consolas, monospace;
-        font-size: 0.92em;
-        line-height: 1.65;
-        margin-bottom: 22px;
-      }
-      .stats-inline {
-        background-color: ${theme.bgCode};
-        padding: 3px 12px;
-        font-family: "Fira Code", "JetBrains Mono", Consolas, monospace;
-        font-size: 0.92em;
-      }
-      .code-key, .code-val { color: ${theme.codeCyan || '#56b6c2'}; }
-      .code-eq { color: #abb2bf; }
-
-      .tree-item {
-        margin-bottom: 20px;
-      }
-      .item-header {
-        display: flex;
-        align-items: baseline;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-bottom: 6px;
-      }
-      .bullet {
-        color: #6c7a89;
-        font-size: 0.95em;
-        margin-right: 2px;
-      }
-      .item-title {
-        color: ${theme.textAbility};
-        font-weight: 600;
-      }
-      .item-meta {
-        color: ${theme.textHeader};
-        font-style: italic;
-      }
-      .indented-body {
-        margin-left: 4px;
-        padding-left: 16px;
-        border-left: 1.5px solid ${theme.borderLine};
-      }
-      .body-para {
-        margin: 0 0 6px 0;
-      }
-      .para-spacer {
-        height: 8px;
-      }
-      .sub-bullet {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        margin-bottom: 7px;
-      }
-      .sub-dot {
-        color: #828997;
-        line-height: 1.5;
-      }
-      .ability-ref { color: ${theme.textAbility}; }
-      .kw-num { color: ${theme.kwNumber}; font-style: italic; }
-      .kw-blood { color: ${theme.kwBlood}; }
-      .kw-bleed { color: ${theme.kwBleed || theme.kwBlood}; }
-      .kw-heal { color: ${theme.kwHeal}; }
-      .kw-crystal { color: ${theme.kwCrystal}; }
-      .kw-debuff { color: ${theme.kwDebuff || theme.textHeader}; }
-      .kw-dur { color: ${theme.kwDuration || theme.kwCrystal}; font-style: italic; }
+      html, body { min-height:100%; margin:0; background:${theme.bgMain}; }
+      body { color:${theme.textMain}; font:14.5px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+      #rendered-content { box-sizing:border-box; min-height:100%; padding:18px 22px; background:${theme.bgMain}; color:${theme.textMain}; overflow-wrap:anywhere; }
+      h2.section-header { color:${theme.textHeader}; font-size:1.55em; font-weight:700; margin:26px 0 14px; padding-bottom:6px; border-bottom:1px solid #2b2b36; }
+      h3.section-header { color:${theme.textHeader}; font-size:1.1em; font-weight:600; margin:0 0 10px; }
+      .stats-block { box-sizing:border-box; background:${theme.bgCode}; border:1px solid #262633; border-radius:6px; padding:12px 16px; font:0.92em/1.65 "Fira Code","JetBrains Mono",Consolas,monospace; margin-bottom:22px; }
+      .stats-inline { display:flex; flex-wrap:wrap; gap:8px; background:${theme.bgCode}; padding:3px 12px; font:0.92em/1.65 "Fira Code","JetBrains Mono",Consolas,monospace; }
+      .code-key { color:${theme.textStatKey}; } .code-val { color:${theme.textStatValue}; } .code-eq { color:#abb2bf; }
+      .tree-item { margin-bottom:20px; } .item-header { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+      .bullet { color:${theme.textBullet}; margin-right:2px; } .item-title { color:${theme.textAbility}; font-weight:600; }
+      .item-meta { color:${theme.textMetadata}; font-style:italic; } .indented-body { margin-left:4px; padding-left:16px; border-left:1.5px solid ${theme.borderLine}; }
+      .body-para { margin:0 0 8px; } .para-spacer { height:8px; }
+      .sub-bullet { display:flex; align-items:flex-start; gap:8px; margin-bottom:7px; } .sub-dot { color:${theme.textBullet}; line-height:1.5; flex:none; }
+      .ability-ref { color:${theme.textReference}; font-weight:500; } .kw-num { color:${theme.textNumber}; font-style:italic; }
+      .kw-dur { color:${theme.textDuration}; font-style:italic; } .inline-code { background:${theme.bgCode}; padding:1px 4px; border-radius:3px; }
+      strong, em { color:${theme.textEmphasis}; } .code-line { white-space:pre-wrap; }
     </style>
-    <div id="rendered-content" data-role="bgMain">${htmlParts.join('\n')}</div>
+    <div id="rendered-content" data-role="bgMain">${output.join('\n')}</div>
   `;
 }

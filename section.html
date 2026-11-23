@@ -30,7 +30,7 @@
 
         view.innerHTML = parseTrelloMarkdown(
           (card && card.desc) || "",
-          savedTheme || DEFAULT_THEME
+          normalizeTheme(savedTheme)
         );
 
         await t.sizeTo("#view");
