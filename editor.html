@@ -111,8 +111,9 @@
 </head>
 <body>
   <header class="toolbar">
-    <span class="hint">Right-click a styled element in the preview to change its color.</span>
+    <span class="hint">Right-click any styled element to customize its syntax role. The same role updates everywhere.</span>
     <div class="toolbar-actions">
+      <button id="reset-btn" type="button">Reset Theme</button>
       <button id="copy-html-btn" type="button">Copy HTML</button>
       <button id="save-btn" type="button">Save &amp; Apply to Card</button>
     </div>
@@ -206,6 +207,12 @@
     });
 
     document.getElementById("close-menu").addEventListener("click", closeMenu);
+
+    document.getElementById("reset-btn").addEventListener("click", () => {
+      currentTheme = { ...DEFAULT_THEME };
+      render();
+      setStatus("Theme reset to the default palette. Save to apply it to this card.");
+    });
 
     document.addEventListener("click", (event) => {
       if (menu.style.display === "block" &&
